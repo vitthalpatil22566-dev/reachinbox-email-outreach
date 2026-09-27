@@ -27,8 +27,8 @@ A production-grade, distributed, multi-sender email scheduling platform built fo
 - [x] **Phase 2:** BullMQ Queue, Worker & Ethereal Email Engine
 - [x] **Phase 3:** Redis Lua Sliding Window Rate Limiting & Inter-Email Delays
 - [x] **Phase 4A:** Elasticsearch Email Indexing & Search
-- [ ] **Phase 4B:** Bull Board & Slack / Google OAuth
-- [ ] **Phase 5:** REST APIs & Business Logic
+- [x] **Phase 4B:** Bull Board Live Queue Dashboard
+- [ ] **Phase 4C:** Slack OAuth & Google OAuth
 - [ ] **Phase 6:** ReachInbox-Inspired Frontend UI
 - [ ] **Phase 7:** Resilience & Concurrency Verification, Demo Video & Submission
 
@@ -183,6 +183,35 @@ Created safely and idempotently on application startup via `ensureIndexExists()`
     }
   }
   ```
+
+---
+
+## 📦 Phase 4B Implementation Details: Bull Board Live Queue Dashboard
+
+### 1. Dedicated Monitoring Endpoint & Adapter
+- **Dashboard URL:** `http://localhost:5000/admin/queues`
+- **Architecture:** Initialized in `src/queues/bullboard.ts` using `@bull-board/api` and `@bull-board/express`.
+- **Zero Redundant Connections:** Directly mounts the existing `emailQueue` (`reachinbox-email-queue`) using `BullMQAdapter`, sharing the persistent Redis instance without duplicate connections.
+
+### 2. Live Queue Observability
+Displays real-time metrics and job lifecycles across five core states:
+- **Delayed:** Future scheduled emails countdown and rate-limit backoff timers.
+- **Waiting:** Ready for immediate pickup by the worker pool.
+- **Active:** Currently being evaluated or dispatched via SMTP.
+- **Completed:** Successfully delivered messages (retained for 24 hours).
+- **Failed:** Permanently failed dispatches with error traces.
+
+### 3. Administrative Actions & Controls
+Enables operators and evaluators to:
+- Inspect granular job payloads (recipient, subject, scheduled time, attempts made).
+- Trigger manual job retries on failed items.
+- Remove or clean completed queues.
+
+### 4. Security & Credentials Hygiene
+- **Configurable HTTP Basic Auth:** Guarded by `bullBoardAuthMiddleware`:
+  - `BULL_BOARD_USERNAME`: Configured in `.env` (default: `admin`).
+  - `BULL_BOARD_PASSWORD`: Configured in `.env` (default: `admin`).
+- **Secrets Redaction:** SMTP passwords, database connection strings, and Redis credentials are never stored in BullMQ job data and are strictly excluded from dashboard serialization.
 
 ---
 

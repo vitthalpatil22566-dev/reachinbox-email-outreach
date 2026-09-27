@@ -4,6 +4,7 @@ import { env } from './config/env';
 import { checkDatabaseConnection } from './config/database';
 import { checkRedisConnection } from './config/redis';
 import apiRouter from './routes';
+import { serverAdapter, bullBoardAuthMiddleware } from './queues/bullboard';
 
 export const app = express();
 
@@ -41,6 +42,9 @@ app.get('/health', async (_req: Request, res: Response) => {
     version: '1.0.0',
   });
 });
+
+// Bull Board live queue monitoring dashboard
+app.use('/admin/queues', bullBoardAuthMiddleware, serverAdapter.getRouter());
 
 // API routes
 app.use('/api/v1', apiRouter);
