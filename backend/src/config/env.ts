@@ -13,6 +13,8 @@ const envSchema = z.object({
   REDIS_PASSWORD: z.string().optional(),
   ELASTICSEARCH_NODE: z.string().default('http://localhost:9200'),
   WORKER_CONCURRENCY: z.string().default('5').transform((val) => parseInt(val, 10)),
+  DEFAULT_HOURLY_LIMIT: z.string().default('50').transform((val) => parseInt(val, 10)),
+  DEFAULT_MIN_DELAY_SECONDS: z.string().default('5').transform((val) => parseInt(val, 10)),
   JWT_SECRET: z.string().default('reachinbox_super_secret_jwt_key_2026'),
   GOOGLE_CLIENT_ID: z.string().default(''),
   GOOGLE_CLIENT_SECRET: z.string().default(''),

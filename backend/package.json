@@ -7,7 +7,9 @@
     "dev": "tsx watch src/server.ts",
     "build": "rimraf dist && tsc",
     "start": "node dist/server.js",
-    "test": "tsx --test src/tests/phase2.test.ts",
+    "test": "tsx --test src/tests/phase2.test.ts src/tests/phase3.test.ts",
+    "test:phase2": "tsx --test src/tests/phase2.test.ts",
+    "test:phase3": "tsx --test src/tests/phase3.test.ts",
     "prisma:generate": "prisma generate",
     "prisma:push": "prisma db push",
     "prisma:studio": "prisma studio"

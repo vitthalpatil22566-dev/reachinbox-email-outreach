@@ -2,14 +2,15 @@ import { Worker, Job } from 'bullmq';
 import { prisma } from '../config/database';
 import { redisClient } from '../config/redis';
 import { env } from '../config/env';
-import { EMAIL_QUEUE_NAME, EmailJobData } from './email.queue';
+import { EMAIL_QUEUE_NAME, EmailJobData, emailQueue } from './email.queue';
 import { MailerService } from '../services/mailer.service';
+import { RateLimiterService } from '../services/ratelimiter.service';
 import { EmailStatus } from '@prisma/client';
 
 /**
  * Processor for each individual email job in BullMQ.
- * Enforces atomic state transitions (SCHEDULED -> PROCESSING -> SENT)
- * and guarantees zero duplicate sends if already SENT.
+ * Integrates atomic Redis Lua rate limiting (hourly sliding window and minimum delay)
+ * and safe conditional database state transitions (SCHEDULED -> PROCESSING -> SENT).
  */
 export async function processEmailJob(job: Job<EmailJobData>): Promise<void> {
   const { emailId } = job.data;
@@ -38,8 +39,56 @@ export async function processEmailJob(job: Job<EmailJobData>): Promise<void> {
     return;
   }
 
-  // 3. Safe Conditional Database State Transition: SCHEDULED / RESCHEDULED -> PROCESSING
-  // Atomic query: only transitions if the status is eligible
+  // 3. Distributed Redis Rate Limiting & Minimum Delay Check (Atomic Lua)
+  const hourlyLimit = email.sender?.hourlyLimit ?? env.DEFAULT_HOURLY_LIMIT;
+  const minDelaySeconds = email.sender?.minDelaySeconds ?? env.DEFAULT_MIN_DELAY_SECONDS;
+
+  const rateCheck = await RateLimiterService.checkAndReserve(
+    email.senderId,
+    hourlyLimit,
+    minDelaySeconds,
+    email.id,
+    true // Reserve the slot if capacity is available
+  );
+
+  // 4. Rescheduling Logic when rate limit or minimum delay constraint is hit
+  if (!rateCheck.allowed) {
+    const delayMs = Math.max(200, rateCheck.delayMs);
+    const newScheduledFor = new Date(Date.now() + delayMs);
+    const rescheduledJobId = `${email.idempotencyKey}:rescheduled:${Date.now()}`;
+
+    console.log(
+      `⏳ [Worker] Sender [${email.sender?.email || email.senderId}] hit ${rateCheck.reason}. Rescheduling email [${email.id}] in ${delayMs}ms (new target: ${newScheduledFor.toISOString()})`
+    );
+
+    // Update Email in PostgreSQL to RESCHEDULED with new scheduled time
+    await prisma.email.update({
+      where: { id: email.id },
+      data: {
+        status: EmailStatus.RESCHEDULED,
+        scheduledFor: newScheduledFor,
+        bullJobId: rescheduledJobId,
+        lastError: `Throttled by ${rateCheck.reason}. Automatically rescheduled.`,
+        updatedAt: new Date(),
+      },
+    });
+
+    // Re-enqueue as a delayed job in BullMQ with deterministic rescheduled ID
+    await emailQueue.add('send-email', job.data, {
+      jobId: rescheduledJobId,
+      delay: delayMs,
+    });
+
+    // Audit log rate limit event in database (debounced to avoid flooding)
+    if (rateCheck.reason === 'HOURLY_LIMIT') {
+      await RateLimiterService.logRateLimitEvent(email.senderId, hourlyLimit);
+    }
+
+    // Acknowledge current execution as successfully rescheduled (not failed)
+    return;
+  }
+
+  // 5. Safe Conditional Database State Transition: SCHEDULED / RESCHEDULED -> PROCESSING
   const transitionResult = await prisma.email.updateMany({
     where: {
       id: email.id,
@@ -61,7 +110,7 @@ export async function processEmailJob(job: Job<EmailJobData>): Promise<void> {
 
   console.log(`⚡ [Worker] Processing email [${email.id}] to ${email.recipientEmail}`);
 
-  // 4. Dispatch Email via SMTP
+  // 6. Dispatch Email via SMTP
   try {
     const senderCreds = email.sender
       ? {
@@ -80,7 +129,7 @@ export async function processEmailJob(job: Job<EmailJobData>): Promise<void> {
       senderCredentials: senderCreds,
     });
 
-    // 5. Post-Send State Transition: PROCESSING -> SENT
+    // 7. Post-Send State Transition: PROCESSING -> SENT
     // ONLY executed after SMTP has verified and accepted the message
     await prisma.email.update({
       where: { id: email.id },
