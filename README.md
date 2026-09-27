@@ -28,7 +28,8 @@ A production-grade, distributed, multi-sender email scheduling platform built fo
 - [x] **Phase 3:** Redis Lua Sliding Window Rate Limiting & Inter-Email Delays
 - [x] **Phase 4A:** Elasticsearch Email Indexing & Search
 - [x] **Phase 4B:** Bull Board Live Queue Dashboard
-- [ ] **Phase 4C:** Slack OAuth & Google OAuth
+- [x] **Phase 4C:** Slack OAuth & Google OAuth
+- [ ] **Phase 5:** Multi-Sender CSV Ingestion & Bulk Scheduling
 - [ ] **Phase 6:** ReachInbox-Inspired Frontend UI
 - [ ] **Phase 7:** Resilience & Concurrency Verification, Demo Video & Submission
 
@@ -212,6 +213,47 @@ Enables operators and evaluators to:
   - `BULL_BOARD_USERNAME`: Configured in `.env` (default: `admin`).
   - `BULL_BOARD_PASSWORD`: Configured in `.env` (default: `admin`).
 - **Secrets Redaction:** SMTP passwords, database connection strings, and Redis credentials are never stored in BullMQ job data and are strictly excluded from dashboard serialization.
+
+---
+
+## 📦 Phase 4C Implementation Details
+
+### 1. Real Google OAuth Authentication
+- **Service:** `src/services/auth.service.ts` uses Google's official `OAuth2Client` from `google-auth-library`.
+- **Flow:**
+  1. `GET /auth/google` (or `/api/v1/auth/google`) redirects user to Google's consent screen requesting `openid`, `email`, and `profile` scopes.
+  2. Google redirects back to `GET /auth/google/callback` with authorization `code`.
+  3. `AuthService.handleGoogleCallback` exchanges code for tokens, validates the OpenID `id_token` ticket signature against `GOOGLE_CLIENT_ID`, and extracts verified identity (`sub`, `email`, `name`, `picture`).
+  4. Idempotently creates or updates the `User` record in PostgreSQL (preventing duplicates).
+  5. Signs a secure session token (JWT signed with `SESSION_SECRET`, 7-day expiration) and sets an HTTP-only cookie `reachinbox_session` (`sameSite: 'lax'`, `secure: production`).
+  6. Redirects user back to frontend at `/?auth=success`.
+- **Security Guard:** `requireAuth` middleware verifies HTTP-only cookie or `Authorization: Bearer <token>`, looks up user, and attaches safe user profile (`id`, `email`, `name`, `avatarUrl`) to `req.user`.
+
+### 2. Real Slack OAuth Integration & Workspace Linking
+- **Service:** `src/services/slack.service.ts` implements real Slack OAuth v2 flow using `@slack/web-api`.
+- **Zero Webhook Substitute:** Uses real Slack OAuth application tokens rather than static incoming webhooks.
+- **Flow:**
+  1. User clicks "Connect Slack" in frontend, hitting `GET /auth/slack` (guarded by `requireAuth`).
+  2. Backend signs user ID into OAuth `state` parameter and redirects to `https://slack.com/oauth/v2/authorize` with scopes `channels:read,groups:read,chat:write,chat:write.public`.
+  3. Slack redirects to `GET /auth/slack/callback` with `code` and `state`.
+  4. Backend exchanges code for bot token, encrypts access token at rest, and upserts `SlackIntegration` record linked to `userId`.
+  5. Redirects to frontend with `/?slack=connected`.
+- **AES-256-GCM Encryption at Rest:**
+  - Token is encrypted in `src/utils/crypto.ts` with randomized 16-byte IV, 32-byte key derived from `ENCRYPTION_KEY`, and authentication tag: `${ivHex}:${authTagHex}:${cipherHex}`.
+  - Raw tokens are NEVER stored in PostgreSQL or logged.
+  - `decryptToken` verifies GCM authentication tag before returning plaintext.
+- **Channel Listing & Selection:**
+  - `GET /api/v1/slack/channels` decrypts bot token in-memory and queries Slack `conversations.list`.
+  - `POST /api/v1/slack/channel` saves target notification channel.
+  - `GET /api/v1/slack/status` returns connection state, team name, and selected channel while strictly masking access tokens and secrets.
+
+### 3. Live Rate-Limit Slack Block Kit Alerting
+- **Trigger:** Hooked directly into `src/queues/email.worker.ts` when an email job hits `HOURLY_LIMIT`.
+- **Non-Blocking Architecture:** Slack notification dispatch is wrapped asynchronously (`.catch(() => {})`); delivery failures or Slack API downtime NEVER block or fail email queue processing.
+- **15-Minute Redis Debounce Cooldown:**
+  - Key: `rate-limit:sender:{senderId}:slack_alert_cooldown` (TTL 900s).
+  - When a sender hits their hourly limit, multiple pending jobs mature around the same time. The cooldown ensures only ONE Slack notification is dispatched per 15-minute window per sender, completely preventing channel spamming.
+- **Block Kit Formatting:** Sends structured card displaying sender email, configured hourly threshold, calculated next window delay, and reassurance that pending jobs were safely deferred rather than dropped.
 
 ---
 

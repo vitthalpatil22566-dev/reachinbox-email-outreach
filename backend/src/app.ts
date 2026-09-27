@@ -1,9 +1,11 @@
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
+import cookieParser from 'cookie-parser';
 import { env } from './config/env';
 import { checkDatabaseConnection } from './config/database';
 import { checkRedisConnection } from './config/redis';
 import apiRouter from './routes';
+import authRoutes from './routes/auth.routes';
 import { serverAdapter, bullBoardAuthMiddleware } from './queues/bullboard';
 
 export const app = express();
@@ -15,6 +17,7 @@ app.use(
     credentials: true,
   })
 );
+app.use(cookieParser());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
@@ -45,6 +48,9 @@ app.get('/health', async (_req: Request, res: Response) => {
 
 // Bull Board live queue monitoring dashboard
 app.use('/admin/queues', bullBoardAuthMiddleware, serverAdapter.getRouter());
+
+// Direct OAuth & Auth routes (supports standard OAuth redirect paths)
+app.use('/auth', authRoutes);
 
 // API routes
 app.use('/api/v1', apiRouter);

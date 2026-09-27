@@ -6,6 +6,7 @@ import { EMAIL_QUEUE_NAME, EmailJobData, emailQueue } from './email.queue';
 import { MailerService } from '../services/mailer.service';
 import { RateLimiterService } from '../services/ratelimiter.service';
 import { ElasticsearchService } from '../services/elasticsearch.service';
+import { SlackService } from '../services/slack.service';
 import { EmailStatus } from '@prisma/client';
 
 /**
@@ -83,9 +84,15 @@ export async function processEmailJob(job: Job<EmailJobData>): Promise<void> {
       delay: delayMs,
     });
 
-    // Audit log rate limit event in database (debounced to avoid flooding)
+    // Audit log rate limit event in database and dispatch Slack alert (debounced)
     if (rateCheck.reason === 'HOURLY_LIMIT') {
       await RateLimiterService.logRateLimitEvent(email.senderId, hourlyLimit);
+      SlackService.sendRateLimitAlert(
+        email.senderId,
+        email.sender?.email || email.recipientEmail,
+        hourlyLimit,
+        delayMs
+      ).catch(() => {});
     }
 
     // Acknowledge current execution as successfully rescheduled (not failed)
