@@ -66,6 +66,7 @@ model Email {
   sentAt             DateTime?
   etherealPreviewUrl String?
   etherealMessageId  String?
+  bullJobId          String?
   idempotencyKey     String      @unique
   attempts           Int         @default(0)
   lastError          String?     @db.Text

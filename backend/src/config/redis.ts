@@ -8,6 +8,9 @@ export const redisConnectionOptions: RedisOptions = {
   maxRetriesPerRequest: null, // Required by BullMQ
   enableReadyCheck: false,
   retryStrategy(times) {
+    if (process.env.NODE_ENV === 'test') {
+      return null; // Stop retrying in test environment if Redis is not running
+    }
     const delay = Math.min(times * 100, 3000);
     return delay;
   },
@@ -16,13 +19,15 @@ export const redisConnectionOptions: RedisOptions = {
 export const redisClient = new Redis(redisConnectionOptions);
 
 redisClient.on('connect', () => {
-  if (env.NODE_ENV !== 'test') {
+  if (process.env.NODE_ENV !== 'test') {
     console.log('✅ Connected to Redis successfully');
   }
 });
 
 redisClient.on('error', (err) => {
-  console.error('❌ Redis error:', err.message);
+  if (process.env.NODE_ENV !== 'test') {
+    console.error('❌ Redis error:', err.message);
+  }
 });
 
 export async function checkRedisConnection(): Promise<boolean> {

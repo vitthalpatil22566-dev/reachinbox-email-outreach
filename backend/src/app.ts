@@ -3,6 +3,7 @@ import cors from 'cors';
 import { env } from './config/env';
 import { checkDatabaseConnection } from './config/database';
 import { checkRedisConnection } from './config/redis';
+import apiRouter from './routes';
 
 export const app = express();
 
@@ -41,13 +42,8 @@ app.get('/health', async (_req: Request, res: Response) => {
   });
 });
 
-// API root
-app.get('/api/v1', (_req: Request, res: Response) => {
-  res.json({
-    message: 'ReachInbox Email Scheduler API v1',
-    status: 'online',
-  });
-});
+// API routes
+app.use('/api/v1', apiRouter);
 
 // 404 handler
 app.use((req: Request, res: Response) => {
