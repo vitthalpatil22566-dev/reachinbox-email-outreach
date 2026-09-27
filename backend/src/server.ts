@@ -5,6 +5,7 @@ import { redisClient } from './config/redis';
 import { emailQueue } from './queues/email.queue';
 import { emailWorker } from './queues/email.worker';
 import { ReconcilerService } from './services/reconciler.service';
+import { ElasticsearchService } from './services/elasticsearch.service';
 
 const server = app.listen(env.PORT, async () => {
   console.log(`
@@ -22,6 +23,13 @@ const server = app.listen(env.PORT, async () => {
     await ReconcilerService.runStartupReconciliation();
   } catch (err: any) {
     console.error('⚠️ Startup reconciliation warning (database may not be ready yet):', err.message);
+  }
+
+  try {
+    // Ensure Elasticsearch index and mappings exist (non-destructive)
+    await ElasticsearchService.ensureIndexExists();
+  } catch (err: any) {
+    console.warn('⚠️ Elasticsearch startup notice (service may be offline):', err.message);
   }
 });
 

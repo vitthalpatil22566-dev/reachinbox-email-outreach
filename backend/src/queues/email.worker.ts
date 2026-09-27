@@ -5,6 +5,7 @@ import { env } from '../config/env';
 import { EMAIL_QUEUE_NAME, EmailJobData, emailQueue } from './email.queue';
 import { MailerService } from '../services/mailer.service';
 import { RateLimiterService } from '../services/ratelimiter.service';
+import { ElasticsearchService } from '../services/elasticsearch.service';
 import { EmailStatus } from '@prisma/client';
 
 /**
@@ -62,7 +63,7 @@ export async function processEmailJob(job: Job<EmailJobData>): Promise<void> {
     );
 
     // Update Email in PostgreSQL to RESCHEDULED with new scheduled time
-    await prisma.email.update({
+    const updatedRescheduled = await prisma.email.update({
       where: { id: email.id },
       data: {
         status: EmailStatus.RESCHEDULED,
@@ -72,6 +73,9 @@ export async function processEmailJob(job: Job<EmailJobData>): Promise<void> {
         updatedAt: new Date(),
       },
     });
+
+    // Synchronize rescheduled status to Elasticsearch (non-blocking)
+    ElasticsearchService.indexScheduledEmail(updatedRescheduled, email.sender?.email).catch(() => {});
 
     // Re-enqueue as a delayed job in BullMQ with deterministic rescheduled ID
     await emailQueue.add('send-email', job.data, {
@@ -131,7 +135,7 @@ export async function processEmailJob(job: Job<EmailJobData>): Promise<void> {
 
     // 7. Post-Send State Transition: PROCESSING -> SENT
     // ONLY executed after SMTP has verified and accepted the message
-    await prisma.email.update({
+    const updatedSent = await prisma.email.update({
       where: { id: email.id },
       data: {
         status: EmailStatus.SENT,
@@ -143,6 +147,9 @@ export async function processEmailJob(job: Job<EmailJobData>): Promise<void> {
       },
     });
 
+    // Synchronize delivered status to Elasticsearch (non-blocking)
+    ElasticsearchService.indexSentEmail(updatedSent, email.sender?.email).catch(() => {});
+
     console.log(`✅ [Worker] Email [${email.id}] successfully SENT via SMTP`);
   } catch (err: any) {
     const errorMessage = err?.message || 'Unknown SMTP error';
@@ -151,7 +158,7 @@ export async function processEmailJob(job: Job<EmailJobData>): Promise<void> {
     const isFinalAttempt = job.attemptsMade + 1 >= (job.opts.attempts || 3);
 
     // Update database with failure info and reset status for retry or mark FAILED
-    await prisma.email.update({
+    const updatedFailed = await prisma.email.update({
       where: { id: email.id },
       data: {
         lastError: errorMessage,
@@ -159,6 +166,11 @@ export async function processEmailJob(job: Job<EmailJobData>): Promise<void> {
         updatedAt: new Date(),
       },
     });
+
+    // Synchronize failure status to Elasticsearch if final attempt (non-blocking)
+    if (isFinalAttempt) {
+      ElasticsearchService.indexFailedEmail(updatedFailed, errorMessage, email.sender?.email).catch(() => {});
+    }
 
     // Rethrow to trigger BullMQ retry/backoff mechanism
     throw err;

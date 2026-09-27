@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { prisma } from '../config/database';
 import { addDelayedEmailJob, getEmailJob, EmailJobData } from '../queues/email.queue';
 import { MailerService } from './mailer.service';
+import { ElasticsearchService } from './elasticsearch.service';
 import { Email, EmailStatus, Prisma } from '@prisma/client';
 
 export type EmailWithSender = Prisma.EmailGetPayload<{
@@ -174,6 +175,9 @@ export class EmailService {
     console.log(
       `📅 Scheduled Email [${email.id}] for ${scheduledDate.toISOString()} (Delay: ${delayMs}ms, BullJobId: ${jobId})`
     );
+
+    // Synchronize to Elasticsearch index (non-blocking)
+    ElasticsearchService.indexScheduledEmail(updatedEmail).catch(() => {});
 
     return {
       email: updatedEmail,

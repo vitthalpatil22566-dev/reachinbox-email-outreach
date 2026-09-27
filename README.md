@@ -26,7 +26,8 @@ A production-grade, distributed, multi-sender email scheduling platform built fo
 - [x] **Phase 1:** Foundation, Docker Compose & Project Scaffolding
 - [x] **Phase 2:** BullMQ Queue, Worker & Ethereal Email Engine
 - [x] **Phase 3:** Redis Lua Sliding Window Rate Limiting & Inter-Email Delays
-- [ ] **Phase 4:** Elasticsearch Sync, Bull Board & Slack / Google OAuth
+- [x] **Phase 4A:** Elasticsearch Email Indexing & Search
+- [ ] **Phase 4B:** Bull Board & Slack / Google OAuth
 - [ ] **Phase 5:** REST APIs & Business Logic
 - [ ] **Phase 6:** ReachInbox-Inspired Frontend UI
 - [ ] **Phase 7:** Resilience & Concurrency Verification, Demo Video & Submission
@@ -111,6 +112,77 @@ When a rate limit or minimum delay constraint is encountered:
 - **Cluster Safety:** Evaluated in Redis single-threaded runtime. Tested under concurrent bursts of 15 simultaneous worker threads with zero breaches.
 - **Sender Ordering:** Rescheduling delays are calculated proportionally from the sender's current window state, preserving queue order among pending emails for that sender.
 - **Unavoidable Concurrency Edge Case:** In extreme worker race conditions where two emails have identical scheduled timestamps down to the millisecond, the worker whose Redis Lua command is scheduled first by Redis wins the slot; the second email is delayed by `minDelaySeconds`, preserving non-burst delivery.
+
+---
+
+## 📦 Phase 4A Implementation Details: Elasticsearch Email Indexing & Search
+
+### 1. Elasticsearch Client & Configuration
+- **Client Service:** Configured in `src/config/elasticsearch.ts` via `@elastic/elasticsearch` `Client`.
+- **Environment Variables:**
+  - `ELASTICSEARCH_URL` / `ELASTICSEARCH_NODE`: Base endpoint (e.g. `http://localhost:9200` or `http://elasticsearch:9200`).
+  - `ELASTICSEARCH_USERNAME` / `ELASTICSEARCH_PASSWORD`: Optional cluster credentials.
+- **Resilient Availability:** Includes connection health checks and automatic offline detection so local testing runs without blocking network timeouts.
+
+### 2. Dedicated Index & Mapping Schema (`reachinbox-emails`)
+Created safely and idempotently on application startup via `ensureIndexExists()` without dropping existing data:
+```json
+{
+  "mappings": {
+    "properties": {
+      "emailId": { "type": "keyword" },
+      "senderId": { "type": "keyword" },
+      "senderEmail": { "type": "keyword" },
+      "recipient": {
+        "type": "text",
+        "fields": { "keyword": { "type": "keyword" } }
+      },
+      "subject": { "type": "text", "analyzer": "standard" },
+      "body": { "type": "text", "analyzer": "standard" },
+      "status": { "type": "keyword" },
+      "scheduledFor": { "type": "date" },
+      "sentAt": { "type": "date" },
+      "failedAt": { "type": "date" },
+      "createdAt": { "type": "date" },
+      "updatedAt": { "type": "date" },
+      "idempotencyKey": { "type": "keyword" },
+      "lastError": { "type": "text" }
+    }
+  }
+}
+```
+
+### 3. Deterministic Idempotency & Lifecycle Sync
+- **Deterministic Document ID:** Uses `email.id` as the Elasticsearch document ID (`_id = email.id`). Re-indexing the same email modifies the existing document in place rather than creating duplicate search hits.
+- **Event-Driven Synchronization:**
+  - **On Scheduling / Rescheduling:** `ElasticsearchService.indexScheduledEmail()` stores `SCHEDULED` / `RESCHEDULED` state and target timestamp.
+  - **On SMTP Delivery:** `ElasticsearchService.indexSentEmail()` updates document status to `SENT` with `sentAt`.
+  - **On Failure:** `ElasticsearchService.indexFailedEmail()` updates document status to `FAILED` with `failedAt` and `lastError`.
+
+### 4. Non-Blocking Failure Guarantee
+- Elasticsearch indexing calls are wrapped in non-blocking try/catch handlers.
+- **PostgreSQL Database Remains the Single Source of Truth:** If Elasticsearch is unreachable, down, or encounters an internal timeout, email delivery continues without interruption. A successful send is **never** failed due to Elasticsearch.
+
+### 5. Full-Text Search API Endpoint (`GET /api/v1/emails/search`)
+- **Query Parameters:**
+  - `q` / `query`: Free-text search matching across `recipient`, `subject`, and `body` (with fuzziness support).
+  - `status`: Filter by delivery status (`SCHEDULED`, `RESCHEDULED`, `SENT`, `FAILED`).
+  - `senderId`: Filter by sender UUID.
+  - `page` (default: 1) and `limit` (default: 20): Offset pagination.
+  - `sortField` (default: `updatedAt`) and `sortOrder` (`asc` | `desc`): Result ordering.
+- **Response Format:**
+  ```json
+  {
+    "success": true,
+    "data": {
+      "total": 42,
+      "page": 1,
+      "limit": 20,
+      "totalPages": 3,
+      "results": [...]
+    }
+  }
+  ```
 
 ---
 

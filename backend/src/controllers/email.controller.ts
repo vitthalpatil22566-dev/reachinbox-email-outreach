@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { EmailService } from '../services/email.service';
+import { ElasticsearchService } from '../services/elasticsearch.service';
 import { getEmailJob } from '../queues/email.queue';
 
 export class EmailController {
@@ -156,6 +157,42 @@ export class EmailController {
       res.status(500).json({
         success: false,
         error: 'ServerError',
+        message: err.message,
+      });
+    }
+  }
+
+  /**
+   * GET /api/v1/emails/search
+   * Full-text search and filtering across indexed emails via Elasticsearch.
+   */
+  public static async searchEmails(req: Request, res: Response): Promise<void> {
+    try {
+      const { q, query, status, senderId, page, limit, sortField, sortOrder } = req.query;
+
+      const searchQuery = (query as string) || (q as string) || undefined;
+      const parsedPage = page ? parseInt(page as string, 10) : 1;
+      const parsedLimit = limit ? parseInt(limit as string, 10) : 20;
+
+      const result = await ElasticsearchService.searchEmails({
+        query: searchQuery,
+        status: status as string,
+        senderId: senderId as string,
+        page: parsedPage,
+        limit: parsedLimit,
+        sortField: sortField as any,
+        sortOrder: (sortOrder as 'asc' | 'desc') || 'desc',
+      });
+
+      res.json({
+        success: true,
+        data: result,
+      });
+    } catch (err: any) {
+      console.error('Error in searchEmails controller:', err.message);
+      res.status(500).json({
+        success: false,
+        error: 'SearchError',
         message: err.message,
       });
     }
