@@ -1,0 +1,119 @@
+version: '3.8'
+
+services:
+  # ----------------------------------------------------
+  # PostgreSQL 16 - Relational Database
+  # ----------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: reachinbox_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: reachinbox
+      POSTGRES_PASSWORD: reachinbox123
+      POSTGRES_DB: reachinbox_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U reachinbox -d reachinbox_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ----------------------------------------------------
+  # Redis 7 - BullMQ Queues & Rate Limiting (AOF Persistence)
+  # ----------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: reachinbox_redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ----------------------------------------------------
+  # Elasticsearch 8.11 - Full-Text Search Engine
+  # ----------------------------------------------------
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    container_name: reachinbox_elasticsearch
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    ports:
+      - "9200:9200"
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -q '\"status\":\"green\"\\|\"status\":\"yellow\"'"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+  # ----------------------------------------------------
+  # Backend - Express TypeScript + BullMQ Worker + API
+  # ----------------------------------------------------
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: reachinbox_backend
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      NODE_ENV: production
+      PORT: 5000
+      FRONTEND_URL: http://localhost:5173
+      DATABASE_URL: postgresql://reachinbox:reachinbox123@postgres:5432/reachinbox_db?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      ELASTICSEARCH_NODE: http://elasticsearch:9200
+      WORKER_CONCURRENCY: 5
+      JWT_SECRET: super_secret_jwt_key_reachinbox_production
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      SLACK_CLIENT_ID: ${SLACK_CLIENT_ID:-}
+      SLACK_CLIENT_SECRET: ${SLACK_CLIENT_SECRET:-}
+      SLACK_REDIRECT_URI: ${SLACK_REDIRECT_URI:-http://localhost:5000/api/v1/slack/callback}
+      DEFAULT_SLACK_WEBHOOK_URL: ${DEFAULT_SLACK_WEBHOOK_URL:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+
+  # ----------------------------------------------------
+  # Frontend - React + Vite + Tailwind (Nginx)
+  # ----------------------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: reachinbox_frontend
+    restart: unless-stopped
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  es_data:
+    driver: local

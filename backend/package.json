@@ -1,0 +1,44 @@
+{
+  "name": "reachinbox-scheduler-backend",
+  "version": "1.0.0",
+  "description": "Production-grade distributed email scheduling backend for ReachInbox",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "rimraf dist && tsc",
+    "start": "node dist/server.js",
+    "prisma:generate": "prisma generate",
+    "prisma:push": "prisma db push",
+    "prisma:studio": "prisma studio"
+  },
+  "dependencies": {
+    "@bull-board/api": "^6.8.0",
+    "@bull-board/express": "^6.8.0",
+    "@elastic/elasticsearch": "^8.11.0",
+    "@prisma/client": "^5.19.0",
+    "@slack/web-api": "^7.8.0",
+    "bullmq": "^5.12.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0",
+    "google-auth-library": "^9.14.1",
+    "ioredis": "^5.4.1",
+    "jsonwebtoken": "^9.0.2",
+    "nodemailer": "^6.9.15",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/jsonwebtoken": "^9.0.6",
+    "@types/node": "^22.5.5",
+    "@types/nodemailer": "^6.4.16",
+    "prisma": "^5.19.0",
+    "rimraf": "^6.0.1",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
