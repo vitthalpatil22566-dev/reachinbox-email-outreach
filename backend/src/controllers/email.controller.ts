@@ -56,6 +56,88 @@ export class EmailController {
   }
 
   /**
+   * POST /api/v1/emails/bulk-schedule
+   * Bulk schedules emails for multiple recipients from CSV / text inputs.
+   */
+  public static async bulkSchedule(req: Request, res: Response): Promise<void> {
+    try {
+      const { recipients, subject, body, scheduledFor, senderId, minDelaySeconds, hourlyLimit } = req.body;
+      const userId = req.user?.id;
+
+      if (!Array.isArray(recipients) || recipients.length === 0) {
+        res.status(400).json({
+          success: false,
+          error: 'BadRequest',
+          message: 'recipients must be a non-empty array of email addresses',
+        });
+        return;
+      }
+
+      if (!subject || !body || !scheduledFor) {
+        res.status(400).json({
+          success: false,
+          error: 'BadRequest',
+          message: 'Missing required fields: subject, body, scheduledFor',
+        });
+        return;
+      }
+
+      const result = await EmailService.bulkSchedule({
+        recipients,
+        subject,
+        body,
+        scheduledFor,
+        senderId,
+        userId,
+        minDelaySeconds: minDelaySeconds !== undefined ? parseInt(minDelaySeconds, 10) : undefined,
+        hourlyLimit: hourlyLimit ? parseInt(hourlyLimit, 10) : undefined,
+      });
+
+      res.status(201).json({
+        success: true,
+        data: result,
+      });
+    } catch (err: any) {
+      console.error('Error in bulkSchedule controller:', err.message);
+      res.status(400).json({
+        success: false,
+        error: 'BulkSchedulingError',
+        message: err.message,
+      });
+    }
+  }
+
+  /**
+   * GET /api/v1/emails
+   * Lists emails with pagination and status/type filtering.
+   */
+  public static async listEmails(req: Request, res: Response): Promise<void> {
+    try {
+      const { type, status, senderId, page, limit } = req.query;
+
+      const result = await EmailService.listEmails({
+        type: type as any,
+        status: status as string,
+        senderId: senderId as string,
+        page: page ? parseInt(page as string, 10) : 1,
+        limit: limit ? parseInt(limit as string, 10) : 20,
+      });
+
+      res.json({
+        success: true,
+        data: result,
+      });
+    } catch (err: any) {
+      console.error('Error in listEmails controller:', err.message);
+      res.status(500).json({
+        success: false,
+        error: 'ServerError',
+        message: err.message,
+      });
+    }
+  }
+
+  /**
    * GET /api/v1/emails/:id
    * Retrieves an email record from the database.
    */

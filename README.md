@@ -29,7 +29,7 @@ A production-grade, distributed, multi-sender email scheduling platform built fo
 - [x] **Phase 4A:** Elasticsearch Email Indexing & Search
 - [x] **Phase 4B:** Bull Board Live Queue Dashboard
 - [x] **Phase 4C:** Slack OAuth & Google OAuth
-- [ ] **Phase 5:** Multi-Sender CSV Ingestion & Bulk Scheduling
+- [x] **Phase 5:** Multi-Sender CSV Ingestion & Bulk Scheduling
 - [ ] **Phase 6:** ReachInbox-Inspired Frontend UI
 - [ ] **Phase 7:** Resilience & Concurrency Verification, Demo Video & Submission
 
@@ -257,39 +257,178 @@ Enables operators and evaluators to:
 
 ---
 
+## 📦 Phase 5 Implementation Details
+
+### 1. Authenticated ReachInbox Dashboard & Navigation
+- **Architecture:** Polished React + TypeScript SaaS dashboard adhering to the dark ReachInbox palette (`#0B0E14` bg, `#121620` card, `#1E2536` border, `#6366F1` indigo primary).
+- **Session Shell:**
+  - Unauthenticated users are presented with a clean login hero page with feature highlights and a direct "Sign in with Google" action.
+  - Authenticated sessions load the user profile (avatar, name, email) via HTTP-only cookie authentication (`GET /auth/me`) and expose an immediate sign-out control.
+  - No OAuth secrets or access tokens are ever exposed to or stored in frontend state/localStorage.
+- **Tab Navigation:** Seamless, zero-jitter client-side switching between **Compose**, **Scheduled**, **Sent**, **Search**, and **Slack Integration**.
+
+### 2. Client-Side CSV & Plain Text Ingestion Engine
+- **Parser (`frontend/src/utils/csvParser.ts`):**
+  - Supports comma-separated CSV with headers (`email`, `recipient`, `to`), raw multi-column tables, or single-email-per-line plain text.
+  - Performs safe whitespace trimming and strict RFC 5322 email regex validation (`/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/`).
+  - Automatically filters invalid tokens and isolates them in an expandable inspection drawer.
+  - Performs case-insensitive deduplication using a `Set<string>`.
+- **Live Summary Metrics Card:**
+  - Displays instant counts before scheduling: **Total Found**, **Valid Recipients**, **Duplicates Removed**, and **Invalid Strings**.
+  - Enforces client-side file size (<5MB) and type validation.
+
+### 3. Bulk Scheduling Pipeline & Idempotency
+- **Backend API (`POST /api/v1/emails/bulk-schedule`):**
+  - Accepts batch payload `{ recipients, subject, body, scheduledFor, senderId, hourlyLimit, minDelaySeconds }`.
+  - Iterates through valid recipients and delegates to the core `EmailService.scheduleEmail` engine.
+  - **Zero Frontend Timing Loop:** The backend + BullMQ Redis ZSET remain 100% responsible for delayed job execution, inter-email delay gating, and rate-limit sliding windows.
+  - **Double-Submission Protection:** Schedule button automatically disables with a loading spinner while submitting, preventing duplicate API triggers.
+  - Reports granular metrics: `{ totalRecipients, scheduledCount, duplicateCount, emails }`.
+
+### 4. Multi-Sender Management & Credential Security
+- **Sender API (`backend/src/routes/sender.routes.ts` & `SenderService`):**
+  - `GET /api/v1/senders`: Lists senders available to the user. Auto-provisions an initial Ethereal SMTP sender if none exist.
+  - `POST /api/v1/senders`: Creates a new sender profile with custom hourly limits and minimum delay settings.
+  - **Zero Credential Exposure:** Responses strictly return safe fields (`id`, `name`, `email`, `hourlyLimit`, `minDelaySeconds`, `isPaused`, `createdAt`). Raw SMTP passwords (`etherealPass`) are **strictly excluded** from API serialization.
+
+### 5. Scheduled & Delivered Email Management
+- **Scheduled Section (`ScheduledTab`):**
+  - Displays recipient, subject, sender profile, target timestamp, attempts count, and status badge.
+  - Color-coded state indicators: `SCHEDULED` (amber), `RESCHEDULED` (purple), `PROCESSING` (blue pulse), `FAILED` (red).
+  - Filter pills for quick isolation of queued vs throttled vs failed jobs.
+  - Server-side pagination controls (Previous / Next).
+- **Sent Section (`SentTab`):**
+  - Displays delivered emails with actual SMTP delivery timestamp (`sentAt`).
+  - Provides a one-click link to the verified **Ethereal Web Preview URL** (`https://ethereal.email/message/...`).
+
+### 6. Elasticsearch Full-Text Query Engine
+- **Search UI (`SearchTab`):**
+  - Powered directly by the `reachinbox-emails` Elasticsearch index (`GET /api/v1/emails/search`).
+  - Supports free-text keyword search across recipient email, subject line, and email body.
+  - Filter by delivery status (`SCHEDULED`, `RESCHEDULED`, `PROCESSING`, `SENT`, `FAILED`).
+  - Filter by sender profile.
+  - Real-time performance indicators showing total Elasticsearch hits and query execution time in milliseconds (`tookMs`).
+
+---
+
 ## ⚙️ Quick Start (Local Development)
 
 ### Prerequisites
 - Node.js >= 18
-- Docker & Docker Compose (or local Postgres, Redis, Elasticsearch instances)
+- Docker & Docker Compose
+
+### Environment Variables (.env)
+Create a `.env` file in the project root:
+```ini
+NODE_ENV=development
+PORT=5000
+FRONTEND_URL=http://localhost:5173
+
+# Database & Cache
+DATABASE_URL=postgresql://reachinbox:reachinbox123@localhost:5432/reachinbox_db?schema=public
+REDIS_HOST=localhost
+REDIS_PORT=6379
+
+# Elasticsearch
+ELASTICSEARCH_NODE=http://localhost:9200
+
+# Concurrency & Rate Limiting Defaults
+WORKER_CONCURRENCY=5
+DEFAULT_HOURLY_LIMIT=50
+DEFAULT_MIN_DELAY_SECONDS=5
+
+# Security & Secrets
+JWT_SECRET=reachinbox_super_secret_jwt_key_2026
+SESSION_SECRET=reachinbox_super_secret_session_key_2026
+ENCRYPTION_KEY=reachinbox_32_byte_secret_key_aes256!!
+
+# Google OAuth
+GOOGLE_CLIENT_ID=your_google_client_id.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=your_google_client_secret
+GOOGLE_CALLBACK_URL=http://localhost:5000/auth/google/callback
+
+# Slack OAuth
+SLACK_CLIENT_ID=your_slack_client_id
+SLACK_CLIENT_SECRET=your_slack_client_secret
+SLACK_REDIRECT_URI=http://localhost:5000/auth/slack/callback
+SLACK_SCOPES=channels:read,groups:read,chat:write,chat:write.public
+
+# Bull Board Dashboard
+BULL_BOARD_USERNAME=admin
+BULL_BOARD_PASSWORD=admin
+```
 
 ### Setup Instructions
-1. Clone the repository and navigate into the root directory:
-   ```bash
-   cd reachinbox-scheduler
-   ```
-2. Copy the environment file:
-   ```bash
-   cp .env.example .env
-   ```
-3. Start infrastructure services using Docker Compose:
+1. **Start infrastructure via Docker Compose:**
    ```bash
    docker compose up -d postgres redis elasticsearch
    ```
-4. Install backend dependencies and initialize the database:
+2. **Setup and run backend:**
    ```bash
    cd backend
    npm install
    npx prisma db push
    npm run dev
    ```
-5. Run the Phase 2 test suite:
-   ```bash
-   npm test
-   ```
-6. Install frontend dependencies and start Vite dev server:
+3. **Setup and run frontend:**
    ```bash
    cd ../frontend
    npm install
    npm run dev
    ```
+4. **Access the application:**
+   - Frontend Dashboard: `http://localhost:5173`
+   - Bull Board Queue Dashboard: `http://localhost:5000/admin/queues` (Credentials: `admin` / `admin`)
+   - Backend Health Check: `http://localhost:5000/health`
+
+### Automated Test Suite
+- Run all backend tests across all phases (44 tests):
+  ```bash
+  cd backend && npm test
+  ```
+- Run individual phase test suites:
+  ```bash
+  npm run test:phase2   # Queue, Worker & Ethereal SMTP
+  npm run test:phase3   # Redis Lua Sliding Window Rate Limiting
+  npm run test:phase4a  # Elasticsearch Indexing & Search
+  npm run test:phase4b  # Bull Board Dashboard
+  npm run test:phase4c  # Google & Slack OAuth Integration
+  npm run test:phase5   # Senders, Bulk Scheduling & Listing
+  ```
+- Run frontend unit tests (8 tests):
+  ```bash
+  cd frontend && npm test
+  ```
+
+---
+
+## 🎬 Demo Flow (10-Step Walkthrough)
+
+1. **Google Login:**
+   - Navigate to `http://localhost:5173`.
+   - Click **"Sign in with Google"** to authenticate via Google Identity Services.
+   - Profile badge appears in the top navigation bar showing avatar, name, and email.
+2. **CSV Upload & Ingestion:**
+   - In the **Compose** tab, choose "File Upload" and drop a CSV file containing recipient addresses (or choose "Direct Paste").
+   - Review the live **Ingestion Metrics Card** showing Valid, Duplicate, and Invalid address breakdowns.
+3. **Schedule Emails:**
+   - Choose a sender profile, set a target start time (e.g. +5 minutes), enter subject and body, and click **"Schedule Emails"**.
+   - Button disables, progress indicator displays, and success banner confirms creation.
+4. **Inspect Delayed Jobs:**
+   - Switch to the **Scheduled Queue** tab to see your jobs listed with `SCHEDULED` status badges and target execution timestamps.
+5. **Restart Backend Server:**
+   - In the terminal running `npm run dev` in the backend, press `Ctrl+C` to terminate the server, then restart it with `npm run dev`.
+6. **Verify Job Persistence (Zero Lost Jobs):**
+   - Refresh the **Scheduled Queue** tab or Bull Board. All delayed jobs remain intact in Redis ZSET without loss or duplicate re-enqueuing.
+7. **Demonstrate Rate Limiting & Zero-Drop Rescheduling:**
+   - Configure a sender with an hourly limit of 2 emails. Schedule 5 emails.
+   - When the worker hits the limit, jobs transition to `RESCHEDULED` with calculated target delay for the next sliding window rather than failing.
+8. **Live Slack Alerting:**
+   - In the **Slack Alerts** tab, click **"Connect Slack Workspace"** and select a target channel.
+   - When the hourly rate limit is hit, ReachInbox posts a structured Block Kit alert to Slack (debounced by the 15-minute Redis cooldown).
+9. **Search with Elasticsearch:**
+   - Switch to the **Elasticsearch Search** tab. Type recipient email keywords or subject terms.
+   - Instant search results are returned from the `reachinbox-emails` index showing match metrics and query latency (`tookMs`).
+10. **Bull Board Queue Monitoring:**
+    - Click **"Queue Monitor"** in the top navigation bar to open `/admin/queues`.
+    - Authenticate (`admin` / `admin`) to inspect active, delayed, waiting, completed, and failed BullMQ jobs.

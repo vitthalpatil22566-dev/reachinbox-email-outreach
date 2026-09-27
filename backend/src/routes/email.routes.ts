@@ -3,8 +3,14 @@ import { EmailController } from '../controllers/email.controller';
 
 const router = Router();
 
-// Schedule a new email
+// List emails with pagination and status filtering
+router.get('/', EmailController.listEmails);
+
+// Schedule a new single email
 router.post('/schedule', EmailController.scheduleEmail);
+
+// Bulk schedule multiple emails
+router.post('/bulk-schedule', EmailController.bulkSchedule);
 
 // Search indexed emails in Elasticsearch
 router.get('/search', EmailController.searchEmails);
