@@ -1,7 +1,11 @@
 import { Router } from 'express';
 import { EmailController } from '../controllers/email.controller';
+import { requireAuth } from '../middlewares/auth.middleware';
 
 const router = Router();
+
+// Enforce session authentication across all email endpoints
+router.use(requireAuth);
 
 // List emails with pagination and status filtering
 router.get('/', EmailController.listEmails);

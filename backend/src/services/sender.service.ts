@@ -35,7 +35,8 @@ export class SenderService {
         };
         this.testSenders.set(defaultTestSender.id, defaultTestSender);
       }
-      return Array.from(this.testSenders.values());
+      const all = Array.from(this.testSenders.values());
+      return userId ? all.filter((s) => s.userId === userId) : all;
     }
 
     try {

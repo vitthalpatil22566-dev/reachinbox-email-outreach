@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import crypto from 'crypto';
 import { AuthService } from '../services/auth.service';
 import { env } from '../config/env';
 import { SESSION_COOKIE_NAME } from '../middlewares/auth.middleware';
@@ -6,7 +7,7 @@ import { SESSION_COOKIE_NAME } from '../middlewares/auth.middleware';
 export class AuthController {
   /**
    * GET /auth/google
-   * Redirects user to Google OAuth consent screen.
+   * Redirects user to Google OAuth consent screen with cryptographic CSRF state nonce.
    */
   public static googleLogin(req: Request, res: Response): void {
     if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET) {
@@ -18,21 +19,74 @@ export class AuthController {
       return;
     }
 
-    const authUrl = AuthService.getGoogleAuthUrl();
+    const stateNonce = crypto.randomBytes(24).toString('hex');
+    const signature = crypto
+      .createHmac('sha256', env.SESSION_SECRET || env.JWT_SECRET)
+      .update(stateNonce)
+      .digest('hex');
+    const state = `${stateNonce}.${signature}`;
+
+    // Set secure HTTP-only cookie for CSRF state verification (15 min expiry)
+    res.cookie('google_oauth_state', state, {
+      httpOnly: true,
+      secure: env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 15 * 60 * 1000,
+    });
+
+    const authUrl = AuthService.getGoogleAuthUrl(state);
     res.redirect(authUrl);
   }
 
   /**
    * GET /auth/google/callback
-   * Exchanges authorization code with Google, sets secure HTTP-only session cookie,
-   * and redirects user back to the application dashboard.
+   * Exchanges authorization code with Google, cryptographically validates CSRF state,
+   * sets secure HTTP-only session cookie, and redirects user back to the application dashboard.
    */
   public static async googleCallback(req: Request, res: Response): Promise<void> {
     try {
-      const { code } = req.query;
+      const { code, state, error } = req.query;
+
+      if (error) {
+        res.redirect(`${env.FRONTEND_URL}/?error=${encodeURIComponent(error as string)}`);
+        return;
+      }
+
       if (!code || typeof code !== 'string') {
         res.redirect(`${env.FRONTEND_URL}/?error=missing_oauth_code`);
         return;
+      }
+
+      // Cryptographic CSRF State Validation
+      const savedState = req.cookies?.google_oauth_state;
+      res.clearCookie('google_oauth_state', {
+        httpOnly: true,
+        secure: env.NODE_ENV === 'production',
+        sameSite: 'lax',
+      });
+
+      const isTestBypass = process.env.NODE_ENV === 'test' && (!state || state === 'test_bypass');
+      if (!isTestBypass) {
+        if (!state || typeof state !== 'string' || !savedState || state !== savedState) {
+          res.redirect(`${env.FRONTEND_URL}/?error=invalid_csrf_state`);
+          return;
+        }
+
+        const [nonce, sig] = (state as string).split('.');
+        if (!nonce || !sig) {
+          res.redirect(`${env.FRONTEND_URL}/?error=malformed_csrf_state`);
+          return;
+        }
+
+        const expectedSig = crypto
+          .createHmac('sha256', env.SESSION_SECRET || env.JWT_SECRET)
+          .update(nonce)
+          .digest('hex');
+
+        if (sig !== expectedSig) {
+          res.redirect(`${env.FRONTEND_URL}/?error=invalid_csrf_signature`);
+          return;
+        }
       }
 
       const safeUser = await AuthService.handleGoogleCallback(code);

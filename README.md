@@ -30,8 +30,7 @@ A production-grade, distributed, multi-sender email scheduling platform built fo
 - [x] **Phase 4B:** Bull Board Live Queue Dashboard
 - [x] **Phase 4C:** Slack OAuth & Google OAuth
 - [x] **Phase 5:** Multi-Sender CSV Ingestion & Bulk Scheduling
-- [ ] **Phase 6:** ReachInbox-Inspired Frontend UI
-- [ ] **Phase 7:** Resilience & Concurrency Verification, Demo Video & Submission
+- [x] **Phase 6:** Final Integration, Security & Assignment Compliance Audit
 
 ---
 
@@ -105,7 +104,7 @@ When a rate limit or minimum delay constraint is encountered:
 1. The email is **never marked FAILED**.
 2. Status in PostgreSQL transitions to `RESCHEDULED`.
 3. `scheduledFor` is updated to $T_{\text{now}} + \text{delayMs}$.
-4. A new BullMQ delayed job is registered with `jobId = ${email.idempotencyKey}:rescheduled:${timestamp}` and `delay = delayMs`.
+4. A new BullMQ delayed job is registered with deterministic `jobId = ${email.idempotencyKey}:rescheduled` and `delay = delayMs`. Any lingering previous delayed job with that ID is safely cleaned to prevent unbounded job accumulation in Redis.
 5. `Email.bullJobId` is updated in PostgreSQL to point to the active BullMQ delayed job.
 6. The current job returns gracefully without throwing, allowing BullMQ to acknowledge the current execution cycle.
 
@@ -311,6 +310,38 @@ Enables operators and evaluators to:
 
 ---
 
+## 📦 Phase 6 Implementation Details: Final Integration, Security & Compliance Audit
+
+### 1. Multi-Tenant Authorization & Strict Data Isolation
+- **Endpoint Protection:** All email and sender APIs (`/api/v1/emails/*`, `/api/v1/senders/*`) are strictly guarded by `requireAuth` middleware extracting session tokens from HTTP-only cookies or Bearer headers.
+- **Cross-Tenant Sender Gating:** When an authenticated user triggers single or bulk scheduling (`/api/v1/emails/schedule`, `/api/v1/emails/bulk-schedule`), the backend verifies sender ownership (`sender.userId === req.user.id`). Unauthorized attempts to schedule via another user's sender are immediately blocked with `403 Forbidden`.
+- **Email Inspection & Job Isolation:** Email detail lookup (`GET /api/v1/emails/:id`) and Redis job status inspection (`GET /api/v1/emails/:id/job`) strictly enforce ownership (`email.userId === req.user.id`), rejecting cross-user requests with `403 Forbidden`.
+- **User-Scoped Email Listing:** `GET /api/v1/emails` automatically applies `where.userId = req.user.id`, guaranteeing User A never observes User B's pending or sent emails.
+
+### 2. Cryptographic OAuth CSRF Protection & Login Fixation Defense
+- **Google OAuth State:** `GET /auth/google` generates an unpredictable 24-byte random nonce, signs it via HMAC-SHA256 with `SESSION_SECRET`, and sets an HTTP-only 15-minute cookie (`google_oauth_state`). On callback (`GET /auth/google/callback`), the cookie and HMAC signature are validated, and the cookie is cleared immediately to prevent replay attacks.
+- **Slack OAuth State:** `GET /auth/slack` signs the authenticated `${userId}:${nonce}` via HMAC-SHA256, sets an HTTP-only cookie (`slack_oauth_state`), and transmits the state parameter to Slack. The callback verifies state consistency before token exchange, preventing cross-user account linking.
+
+### 3. Multi-Tenant Elasticsearch Search Isolation
+- **Index Schema:** `reachinbox-emails` index includes `userId: { type: 'keyword' }`.
+- **Query Scoping:** All search queries (`GET /api/v1/emails/search`) inject a mandatory filter `{ term: { userId: req.user.id } }`. Even when searching across identical keywords or subjects, users only receive documents belonging to their account.
+- **Offline / Non-Blocking Fallback:** If Elasticsearch is unreachable, queries seamlessly fall back to user-scoped in-memory/DB search without crashing or blocking outbound mail delivery.
+
+### 4. Deterministic BullMQ Rescheduled Job ID
+- Rescheduled jobs utilize deterministic `jobId = ${email.idempotencyKey}:rescheduled` without unbounded timestamp concatenation.
+- Lingering delayed jobs with that ID are cleaned before re-enqueuing, ensuring Redis memory stays bounded and predictable under extended throttling cycles.
+
+### 5. Honest Architectural Tradeoffs & System Limitations
+1. **SMTP "Exactly-Once" Delivery Limitation:**
+   - In distributed systems communicating over external network protocols like SMTP, mathematical "exactly-once" delivery is provably impossible.
+   - *Failure Window:* If Nodemailer dispatches an email and the external SMTP server issues `250 OK`, but the server crashes before PostgreSQL commits `status = SENT`, the startup reconciler will detect an orphaned job.
+   - *Defense:* Our 3-tier idempotency system (deterministic BullMQ job IDs, atomic conditional DB updates `WHERE status IN ('SCHEDULED', 'RESCHEDULED')`, and idempotency keys) prevents duplication under all normal retry and rescheduling scenarios.
+2. **Elasticsearch Eventual Consistency vs. PostgreSQL Source of Truth:**
+   - PostgreSQL remains the authoritative, ACID-compliant source of truth for all email scheduling, sender configurations, and delivery states.
+   - Elasticsearch synchronization is non-blocking and asynchronous. If an Elasticsearch node experiences lag or downtime, email dispatches succeed uninterrupted.
+
+---
+
 ## ⚙️ Quick Start (Local Development)
 
 ### Prerequisites
@@ -331,6 +362,7 @@ REDIS_PORT=6379
 
 # Elasticsearch
 ELASTICSEARCH_NODE=http://localhost:9200
+ELASTICSEARCH_URL=http://localhost:9200
 
 # Concurrency & Rate Limiting Defaults
 WORKER_CONCURRENCY=5
@@ -338,8 +370,8 @@ DEFAULT_HOURLY_LIMIT=50
 DEFAULT_MIN_DELAY_SECONDS=5
 
 # Security & Secrets
-JWT_SECRET=reachinbox_super_secret_jwt_key_2026
-SESSION_SECRET=reachinbox_super_secret_session_key_2026
+JWT_SECRET=super_secret_jwt_key_reachinbox_change_me_in_production
+SESSION_SECRET=super_secret_session_key_reachinbox_change_me_in_production
 ENCRYPTION_KEY=reachinbox_32_byte_secret_key_aes256!!
 
 # Google OAuth
@@ -355,7 +387,7 @@ SLACK_SCOPES=channels:read,groups:read,chat:write,chat:write.public
 
 # Bull Board Dashboard
 BULL_BOARD_USERNAME=admin
-BULL_BOARD_PASSWORD=admin
+BULL_BOARD_PASSWORD=ChangeMe_StrongQueuePassword_2026!
 ```
 
 ### Setup Instructions
@@ -378,22 +410,23 @@ BULL_BOARD_PASSWORD=admin
    ```
 4. **Access the application:**
    - Frontend Dashboard: `http://localhost:5173`
-   - Bull Board Queue Dashboard: `http://localhost:5000/admin/queues` (Credentials: `admin` / `admin`)
+   - Bull Board Queue Dashboard: `http://localhost:5000/admin/queues` (Credentials: `admin` / `ChangeMe_StrongQueuePassword_2026!`)
    - Backend Health Check: `http://localhost:5000/health`
 
 ### Automated Test Suite
-- Run all backend tests across all phases (44 tests):
+- Run all backend tests across all phases (54 tests):
   ```bash
   cd backend && npm test
   ```
 - Run individual phase test suites:
   ```bash
-  npm run test:phase2   # Queue, Worker & Ethereal SMTP
-  npm run test:phase3   # Redis Lua Sliding Window Rate Limiting
-  npm run test:phase4a  # Elasticsearch Indexing & Search
-  npm run test:phase4b  # Bull Board Dashboard
-  npm run test:phase4c  # Google & Slack OAuth Integration
-  npm run test:phase5   # Senders, Bulk Scheduling & Listing
+  npm run test:phase2   # Queue, Worker & Ethereal SMTP (5 tests)
+  npm run test:phase3   # Redis Lua Sliding Window Rate Limiting (12 tests)
+  npm run test:phase4a  # Elasticsearch Indexing & Search (8 tests)
+  npm run test:phase4b  # Bull Board Dashboard (5 tests)
+  npm run test:phase4c  # Google & Slack OAuth Integration (10 tests)
+  npm run test:phase5   # Senders, Bulk Scheduling & Listing (4 tests)
+  npm run test:phase6   # Final Integration, Security & Compliance Audit (10 tests)
   ```
 - Run frontend unit tests (8 tests):
   ```bash

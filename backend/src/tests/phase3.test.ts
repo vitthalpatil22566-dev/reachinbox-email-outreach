@@ -205,7 +205,7 @@ describe('Phase 3 — Redis Lua Sliding Window Rate Limiting & Inter-Email Delay
       ...originalEmail,
       status: EmailStatus.RESCHEDULED,
       scheduledFor: new Date(originalEmail.scheduledFor.getTime() + delayMs),
-      bullJobId: `${originalEmail.idempotencyKey}:rescheduled:${Date.now()}`,
+      bullJobId: `${originalEmail.idempotencyKey}:rescheduled`,
     };
 
     assert.strictEqual(rescheduledEmail.id, originalEmail.id, 'Email UUID must remain identical');

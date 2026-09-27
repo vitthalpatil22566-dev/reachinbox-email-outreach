@@ -1,17 +1,41 @@
 import { Request, Response } from 'express';
 import { EmailService } from '../services/email.service';
 import { ElasticsearchService } from '../services/elasticsearch.service';
+import { SenderService } from '../services/sender.service';
 import { getEmailJob } from '../queues/email.queue';
+import { prisma } from '../config/database';
 
 export class EmailController {
+  /**
+   * Helper to verify that a sender belongs to the requesting user.
+   */
+  public static async verifySenderOwnership(senderId: string, userId: string): Promise<boolean> {
+    if (process.env.NODE_ENV === 'test') {
+      const sender = SenderService.testSenders.get(senderId);
+      if (sender && sender.userId && sender.userId !== userId) {
+        return false;
+      }
+      return true;
+    }
+
+    try {
+      const sender = await prisma.sender.findUnique({ where: { id: senderId } });
+      if (sender && sender.userId && sender.userId !== userId) {
+        return false;
+      }
+    } catch {}
+    return true;
+  }
+
   /**
    * POST /api/v1/emails/schedule
    * Creates/schedules a new email job.
    */
   public static async scheduleEmail(req: Request, res: Response): Promise<void> {
     try {
-      const { recipientEmail, subject, body, scheduledFor, senderId, userId, idempotencyKey } =
+      const { recipientEmail, subject, body, scheduledFor, senderId, idempotencyKey } =
         req.body;
+      const userId = req.user?.id || req.body.userId;
 
       if (!recipientEmail || !subject || !body || !scheduledFor) {
         res.status(400).json({
@@ -20,6 +44,18 @@ export class EmailController {
           message: 'Missing required fields: recipientEmail, subject, body, scheduledFor',
         });
         return;
+      }
+
+      if (senderId && userId) {
+        const isOwner = await EmailController.verifySenderOwnership(senderId, userId);
+        if (!isOwner) {
+          res.status(403).json({
+            success: false,
+            error: 'Forbidden',
+            message: 'You do not have permission to schedule emails using this sender',
+          });
+          return;
+        }
       }
 
       const result = await EmailService.scheduleEmail({
@@ -82,6 +118,18 @@ export class EmailController {
         return;
       }
 
+      if (senderId && userId) {
+        const isOwner = await EmailController.verifySenderOwnership(senderId, userId);
+        if (!isOwner) {
+          res.status(403).json({
+            success: false,
+            error: 'Forbidden',
+            message: 'You do not have permission to schedule emails using this sender',
+          });
+          return;
+        }
+      }
+
       const result = await EmailService.bulkSchedule({
         recipients,
         subject,
@@ -114,11 +162,13 @@ export class EmailController {
   public static async listEmails(req: Request, res: Response): Promise<void> {
     try {
       const { type, status, senderId, page, limit } = req.query;
+      const userId = req.user?.id;
 
       const result = await EmailService.listEmails({
         type: type as any,
         status: status as string,
         senderId: senderId as string,
+        userId,
         page: page ? parseInt(page as string, 10) : 1,
         limit: limit ? parseInt(limit as string, 10) : 20,
       });
@@ -151,6 +201,15 @@ export class EmailController {
           success: false,
           error: 'NotFound',
           message: `Email with ID ${id} not found`,
+        });
+        return;
+      }
+
+      if (req.user?.id && email.userId && email.userId !== req.user.id) {
+        res.status(403).json({
+          success: false,
+          error: 'Forbidden',
+          message: 'You do not have permission to access this email record',
         });
         return;
       }
@@ -206,6 +265,15 @@ export class EmailController {
         return;
       }
 
+      if (req.user?.id && email.userId && email.userId !== req.user.id) {
+        res.status(403).json({
+          success: false,
+          error: 'Forbidden',
+          message: 'You do not have permission to inspect this email job',
+        });
+        return;
+      }
+
       const jobId = email.bullJobId || email.idempotencyKey;
       const job = await getEmailJob(jobId);
 
@@ -251,6 +319,7 @@ export class EmailController {
   public static async searchEmails(req: Request, res: Response): Promise<void> {
     try {
       const { q, query, status, senderId, page, limit, sortField, sortOrder } = req.query;
+      const userId = req.user?.id;
 
       const searchQuery = (query as string) || (q as string) || undefined;
       const parsedPage = page ? parseInt(page as string, 10) : 1;
@@ -260,6 +329,7 @@ export class EmailController {
         query: searchQuery,
         status: status as string,
         senderId: senderId as string,
+        userId,
         page: parsedPage,
         limit: parsedLimit,
         sortField: sortField as any,

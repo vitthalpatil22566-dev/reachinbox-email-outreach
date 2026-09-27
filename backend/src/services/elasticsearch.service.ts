@@ -19,12 +19,14 @@ export interface EmailSearchDoc {
   updatedAt: string;
   idempotencyKey: string;
   lastError?: string | null;
+  userId?: string;
 }
 
 export interface SearchQueryParams {
   query?: string;
   status?: string;
   senderId?: string;
+  userId?: string;
   page?: number;
   limit?: number;
   sortField?: 'scheduledFor' | 'sentAt' | 'createdAt' | 'updatedAt';
@@ -82,6 +84,7 @@ export class ElasticsearchService {
         mappings: {
           properties: {
             emailId: { type: 'keyword' },
+            userId: { type: 'keyword' },
             senderId: { type: 'keyword' },
             senderEmail: { type: 'keyword' },
             recipient: {
@@ -151,6 +154,7 @@ export class ElasticsearchService {
       emailId: email.id,
       senderId: email.senderId,
       senderEmail,
+      userId: (email as any).userId,
       recipient: email.recipientEmail,
       subject: email.subject,
       body: email.body,
@@ -173,6 +177,7 @@ export class ElasticsearchService {
       emailId: email.id,
       senderId: email.senderId,
       senderEmail,
+      userId: (email as any).userId,
       recipient: email.recipientEmail,
       subject: email.subject,
       body: email.body,
@@ -199,6 +204,7 @@ export class ElasticsearchService {
       emailId: email.id,
       senderId: email.senderId,
       senderEmail,
+      userId: (email as any).userId,
       recipient: email.recipientEmail,
       subject: email.subject,
       body: email.body,
@@ -254,6 +260,12 @@ export class ElasticsearchService {
       if (params.senderId) {
         filterClauses.push({
           term: { senderId: params.senderId },
+        });
+      }
+
+      if (params.userId) {
+        filterClauses.push({
+          term: { userId: params.userId },
         });
       }
 
@@ -316,6 +328,11 @@ export class ElasticsearchService {
     // Sender filter
     if (params.senderId) {
       list = list.filter((doc) => doc.senderId === params.senderId);
+    }
+
+    // User data isolation filter
+    if (params.userId) {
+      list = list.filter((doc) => doc.userId === params.userId);
     }
 
     // Free-text query

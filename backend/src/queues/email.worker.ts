@@ -57,7 +57,7 @@ export async function processEmailJob(job: Job<EmailJobData>): Promise<void> {
   if (!rateCheck.allowed) {
     const delayMs = Math.max(200, rateCheck.delayMs);
     const newScheduledFor = new Date(Date.now() + delayMs);
-    const rescheduledJobId = `${email.idempotencyKey}:rescheduled:${Date.now()}`;
+    const rescheduledJobId = `${email.idempotencyKey}:rescheduled`;
 
     console.log(
       `⏳ [Worker] Sender [${email.sender?.email || email.senderId}] hit ${rateCheck.reason}. Rescheduling email [${email.id}] in ${delayMs}ms (new target: ${newScheduledFor.toISOString()})`
@@ -77,6 +77,14 @@ export async function processEmailJob(job: Job<EmailJobData>): Promise<void> {
 
     // Synchronize rescheduled status to Elasticsearch (non-blocking)
     ElasticsearchService.indexScheduledEmail(updatedRescheduled, email.sender?.email).catch(() => {});
+
+    // Remove any lingering delayed job with this deterministic ID before re-adding
+    try {
+      const existingJob = await emailQueue.getJob(rescheduledJobId);
+      if (existingJob) {
+        await existingJob.remove();
+      }
+    } catch {}
 
     // Re-enqueue as a delayed job in BullMQ with deterministic rescheduled ID
     await emailQueue.add('send-email', job.data, {
