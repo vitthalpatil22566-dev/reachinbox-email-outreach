@@ -26,3 +26,22 @@
 ::-webkit-scrollbar-thumb:hover {
   background: #374151;
 }
+
+/* Ensure native date & time pickers are bright, visible, and fully clickable in dark mode */
+input[type="date"],
+input[type="time"] {
+  color-scheme: dark;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="time"]::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  filter: invert(1);
+  opacity: 0.85;
+  padding: 4px;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator:hover,
+input[type="time"]::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+}

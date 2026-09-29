@@ -1,6 +1,12 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseRecipientInput } from '../utils/csvParser';
+import {
+  formatLocalDate,
+  formatLocalTime,
+  combineLocalDateTime,
+  formatTargetDispatch,
+} from '../components/ComposeTab';
 
 describe('Phase 5 — Frontend Ingestion, Parsing & Client Verification', () => {
   // --------------------------------------------------------------------------
@@ -116,5 +122,41 @@ Charlie Brown,charlie@reachinbox.ai,Initech`;
     assert.strictEqual(emptySubject.trim().length > 0, false);
     assert.strictEqual(validBody.trim().length > 0, true);
     assert.strictEqual(emptyBody.trim().length > 0, false);
+  });
+
+  it('9. Formats local date and time without UTC offset drift', () => {
+    const fixedDate = new Date(2026, 8, 28, 18, 30, 0, 0); // 28 Sep 2026, 18:30 local
+    const formattedDate = formatLocalDate(fixedDate);
+    const formattedTime = formatLocalTime(fixedDate);
+
+    assert.strictEqual(formattedDate, '2026-09-28');
+    assert.strictEqual(formattedTime, '18:30');
+  });
+
+  it('10. Combines manual date and time into local Date instance correctly', () => {
+    const combined = combineLocalDateTime('2026-09-28', '18:30');
+    assert.ok(combined !== null);
+    assert.strictEqual(combined.getFullYear(), 2026);
+    assert.strictEqual(combined.getMonth(), 8); // September (0-indexed)
+    assert.strictEqual(combined.getDate(), 28);
+    assert.strictEqual(combined.getHours(), 18);
+    assert.strictEqual(combined.getMinutes(), 30);
+  });
+
+  it('11. Rejects invalid or past combined date-time strings gracefully', () => {
+    assert.strictEqual(combineLocalDateTime('', '18:30'), null);
+    assert.strictEqual(combineLocalDateTime('2026-09-28', ''), null);
+    assert.strictEqual(combineLocalDateTime('invalid', '18:30'), null);
+
+    const pastCombined = combineLocalDateTime('2020-01-01', '10:00');
+    assert.ok(pastCombined !== null);
+    assert.strictEqual(pastCombined.getTime() <= Date.now(), true);
+  });
+
+  it('12. Formats target dispatch confirmation string accurately', () => {
+    const combined = combineLocalDateTime('2026-09-28', '18:30');
+    assert.ok(combined !== null);
+    const formatted = formatTargetDispatch(combined);
+    assert.strictEqual(formatted, 'Mon, 28 Sep 2026 at 18:30');
   });
 });

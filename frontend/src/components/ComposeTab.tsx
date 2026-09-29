@@ -5,6 +5,7 @@ import {
   AlertCircle,
   CheckCircle2,
   Clock,
+  Calendar,
   Shield,
   Plus,
   RefreshCw,
@@ -15,6 +16,48 @@ import { parseRecipientInput } from '../utils/csvParser';
 import { api } from '../api/client';
 import { Sender, ParsedRecipients } from '../types';
 import { SenderModal } from './SenderModal';
+
+// Formats a Date into local YYYY-MM-DD for HTML5 date inputs
+export const formatLocalDate = (d: Date): string => {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+// Formats a Date into local HH:mm for HTML5 time inputs
+export const formatLocalTime = (d: Date): string => {
+  const hours = String(d.getHours()).padStart(2, '0');
+  const minutes = String(d.getMinutes()).padStart(2, '0');
+  return `${hours}:${minutes}`;
+};
+
+// Combines local date string (YYYY-MM-DD) and time string (HH:mm) into a local Date instance
+export const combineLocalDateTime = (dateStr: string, timeStr: string): Date | null => {
+  if (!dateStr || !timeStr) return null;
+  const dateParts = dateStr.split('-').map(Number);
+  const timeParts = timeStr.split(':').map(Number);
+  if (dateParts.length !== 3 || timeParts.length < 2) return null;
+  const [year, month, day] = dateParts;
+  const [hours, minutes] = timeParts;
+  if (!year || !month || !day || isNaN(hours) || isNaN(minutes)) return null;
+  const combined = new Date(year, month - 1, day, hours, minutes, 0, 0);
+  return isNaN(combined.getTime()) ? null : combined;
+};
+
+// Formats combined date into the exact human confirmation: "Mon, 28 Sep 2026 at 18:30"
+export const formatTargetDispatch = (dt: Date | null): string => {
+  if (!dt) return '';
+  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const dayName = days[dt.getDay()];
+  const dayNum = dt.getDate();
+  const monthName = months[dt.getMonth()];
+  const year = dt.getFullYear();
+  const hours = String(dt.getHours()).padStart(2, '0');
+  const minutes = String(dt.getMinutes()).padStart(2, '0');
+  return `${dayName}, ${dayNum} ${monthName} ${year} at ${hours}:${minutes}`;
+};
 
 interface ComposeTabProps {
   senders: Sender[];
@@ -41,9 +84,10 @@ export const ComposeTab: React.FC<ComposeTabProps> = ({
   });
   const [showInvalidDetails, setShowInvalidDetails] = useState<boolean>(false);
 
-  // Scheduling timing
-  const defaultStartTime = new Date(Date.now() + 5 * 60 * 1000).toISOString().slice(0, 16);
-  const [scheduledFor, setScheduledFor] = useState<string>(defaultStartTime);
+  // Scheduling timing (local date and time)
+  const initialTarget = new Date(Date.now() + 5 * 60 * 1000);
+  const [startDate, setStartDate] = useState<string>(() => formatLocalDate(initialTarget));
+  const [startTime, setStartTime] = useState<string>(() => formatLocalTime(initialTarget));
   const [hourlyLimit, setHourlyLimit] = useState<number>(50);
   const [minDelaySeconds, setMinDelaySeconds] = useState<number>(5);
 
@@ -101,7 +145,8 @@ export const ComposeTab: React.FC<ComposeTabProps> = ({
   // Quick timing offset button
   const setQuickOffset = (minutes: number) => {
     const d = new Date(Date.now() + minutes * 60 * 1000);
-    setScheduledFor(d.toISOString().slice(0, 16));
+    setStartDate(formatLocalDate(d));
+    setStartTime(formatLocalTime(d));
   };
 
   // Schedule submission
@@ -123,9 +168,14 @@ export const ComposeTab: React.FC<ComposeTabProps> = ({
       return;
     }
 
-    const targetDate = new Date(scheduledFor);
-    if (isNaN(targetDate.getTime()) || targetDate.getTime() < Date.now() - 30000) {
-      onError('Scheduled start time must be in the future');
+    const targetDate = combineLocalDateTime(startDate, startTime);
+    if (!targetDate) {
+      onError('Please select a valid scheduled date and time');
+      return;
+    }
+
+    if (targetDate.getTime() <= Date.now()) {
+      onError('Scheduled time must be in the future');
       return;
     }
 
@@ -152,6 +202,9 @@ export const ComposeTab: React.FC<ComposeTabProps> = ({
       setRawText('');
       setSubject('');
       setBody('');
+      const resetTarget = new Date(Date.now() + 5 * 60 * 1000);
+      setStartDate(formatLocalDate(resetTarget));
+      setStartTime(formatLocalTime(resetTarget));
       if (fileInputRef.current) fileInputRef.current.value = '';
     } catch (err: any) {
       onError(err.response?.data?.message || err.message || 'Bulk scheduling failed');
@@ -220,46 +273,109 @@ export const ComposeTab: React.FC<ComposeTabProps> = ({
           </div>
 
           {/* Start Date & Time */}
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
               <label className="text-xs font-semibold uppercase tracking-wider text-reach-muted flex items-center gap-1.5">
                 <Clock className="w-3.5 h-3.5 text-indigo-400" />
                 Start Date & Time
               </label>
-              <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => setQuickOffset(5)}
-                  className="text-[10px] px-1.5 py-0.5 rounded bg-reach-bg border border-reach-border text-reach-muted hover:text-white"
-                >
-                  +5m
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setQuickOffset(15)}
-                  className="text-[10px] px-1.5 py-0.5 rounded bg-reach-bg border border-reach-border text-reach-muted hover:text-white"
-                >
-                  +15m
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setQuickOffset(60)}
-                  className="text-[10px] px-1.5 py-0.5 rounded bg-reach-bg border border-reach-border text-reach-muted hover:text-white"
-                >
-                  +1h
-                </button>
-              </div>
             </div>
-            <input
-              type="datetime-local"
-              required
-              value={scheduledFor}
-              onChange={(e) => setScheduledFor(e.target.value)}
-              className="w-full bg-reach-bg border border-reach-border text-sm rounded-lg px-3 py-2 text-white focus:outline-none focus:border-reach-primary"
-            />
-            <p className="text-[11px] text-reach-muted mt-1.5">
-              Target execution time for the initial batch in BullMQ
-            </p>
+
+            {/* Date Input */}
+            <div>
+              <label htmlFor="schedule-date-input" className="block text-[11px] font-medium text-gray-300 mb-1 flex items-center gap-1.5">
+                <Calendar className="w-3.5 h-3.5 text-indigo-400" />
+                Date
+              </label>
+              <input
+                id="schedule-date-input"
+                type="date"
+                required
+                min={formatLocalDate(new Date())}
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                onClick={(e) => {
+                  try {
+                    (e.target as any).showPicker?.();
+                  } catch {}
+                }}
+                onFocus={(e) => {
+                  try {
+                    (e.target as any).showPicker?.();
+                  } catch {}
+                }}
+                style={{ colorScheme: 'dark' }}
+                className="w-full bg-reach-bg border border-reach-border text-sm rounded-lg px-3 py-2 text-white focus:outline-none focus:border-reach-primary cursor-pointer hover:border-reach-primary/60 transition-colors"
+              />
+            </div>
+
+            {/* Time Input */}
+            <div>
+              <label htmlFor="schedule-time-input" className="block text-[11px] font-medium text-gray-300 mb-1 flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5 text-indigo-400" />
+                Time
+              </label>
+              <input
+                id="schedule-time-input"
+                type="time"
+                required
+                value={startTime}
+                onChange={(e) => setStartTime(e.target.value)}
+                onClick={(e) => {
+                  try {
+                    (e.target as any).showPicker?.();
+                  } catch {}
+                }}
+                onFocus={(e) => {
+                  try {
+                    (e.target as any).showPicker?.();
+                  } catch {}
+                }}
+                style={{ colorScheme: 'dark' }}
+                className="w-full bg-reach-bg border border-reach-border text-sm rounded-lg px-3 py-2 text-white focus:outline-none focus:border-reach-primary cursor-pointer hover:border-reach-primary/60 transition-colors"
+              />
+            </div>
+
+            {/* Quick Shortcuts */}
+            <div className="flex items-center gap-1.5 pt-0.5">
+              <span className="text-[10px] uppercase font-semibold text-reach-muted mr-1">Quick:</span>
+              <button
+                type="button"
+                onClick={() => setQuickOffset(5)}
+                className="text-xs font-medium px-2.5 py-1 rounded bg-reach-bg hover:bg-reach-border border border-reach-border text-gray-300 hover:text-white hover:border-reach-primary transition-all active:scale-95"
+              >
+                +5m
+              </button>
+              <button
+                type="button"
+                onClick={() => setQuickOffset(15)}
+                className="text-xs font-medium px-2.5 py-1 rounded bg-reach-bg hover:bg-reach-border border border-reach-border text-gray-300 hover:text-white hover:border-reach-primary transition-all active:scale-95"
+              >
+                +15m
+              </button>
+              <button
+                type="button"
+                onClick={() => setQuickOffset(60)}
+                className="text-xs font-medium px-2.5 py-1 rounded bg-reach-bg hover:bg-reach-border border border-reach-border text-gray-300 hover:text-white hover:border-reach-primary transition-all active:scale-95"
+              >
+                +1h
+              </button>
+            </div>
+
+            {/* Live Target Confirmation */}
+            {(() => {
+              const dt = combineLocalDateTime(startDate, startTime);
+              return dt ? (
+                <p className="text-[11px] text-reach-muted pt-0.5">
+                  Target dispatch:{' '}
+                  <span className="text-white font-medium">
+                    {formatTargetDispatch(dt)}
+                  </span>
+                </p>
+              ) : (
+                <p className="text-[11px] text-red-400">Please choose a valid date and time</p>
+              );
+            })()}
           </div>
 
           {/* Rate Limits Overrides */}
@@ -455,8 +571,15 @@ export const ComposeTab: React.FC<ComposeTabProps> = ({
           <div className="text-xs text-reach-muted">
             {parsed.valid.length > 0 ? (
               <span className="text-gray-300">
-                Ready to schedule <strong>{parsed.valid.length}</strong> email(s) starting{' '}
-                <strong>{new Date(scheduledFor).toLocaleTimeString()}</strong>.
+                Ready to schedule <strong>{parsed.valid.length}</strong> email(s) for{' '}
+                <strong>
+                  {(() => {
+                    const dt = combineLocalDateTime(startDate, startTime);
+                    return dt
+                      ? `${dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} at ${dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+                      : 'selected time';
+                  })()}
+                </strong>.
               </span>
             ) : (
               <span>Add valid recipients above to enable scheduling.</span>

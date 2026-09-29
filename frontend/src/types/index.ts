@@ -118,3 +118,23 @@ export interface ParsedRecipients {
   invalid: string[];
   duplicatesRemoved: number;
 }
+
+export interface SystemHealth {
+  status: 'healthy' | 'degraded' | string;
+  timestamp: string;
+  services: {
+    database: 'up' | 'down';
+    redis: 'up' | 'down';
+  };
+  version: string;
+}
+
+export interface EmailJobStatus {
+  emailId: string;
+  bullJobId: string;
+  jobStatus: string;
+  delay?: number;
+  timestamp?: number;
+  progress?: number;
+  failedReason?: string;
+}

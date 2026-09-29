@@ -20,9 +20,6 @@ export const Navbar: React.FC<NavbarProps> = ({ user, authLoading, onLogin, onLo
         <div>
           <div className="flex items-center gap-2">
             <h1 className="font-bold text-lg leading-tight tracking-tight text-white">ReachInbox</h1>
-            <span className="text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded bg-reach-primary/20 text-indigo-300 border border-reach-primary/30">
-              Phase 5
-            </span>
           </div>
           <p className="text-xs text-reach-muted">Distributed Multi-Sender Email Scheduler</p>
         </div>

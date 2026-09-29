@@ -96,7 +96,7 @@ export const SlackTab: React.FC<SlackTabProps> = ({ onSuccess, onError }) => {
             </div>
             <div>
               <h3 className="font-bold text-xl text-white flex items-center gap-2.5">
-                Slack OAuth Integration
+                Slack Notifications
                 {loading ? (
                   <RefreshCw className="w-4 h-4 animate-spin text-reach-muted" />
                 ) : status?.connected ? (
@@ -111,7 +111,7 @@ export const SlackTab: React.FC<SlackTabProps> = ({ onSuccess, onError }) => {
                 )}
               </h3>
               <p className="text-xs text-reach-muted mt-1 max-w-lg leading-relaxed">
-                Connect your team workspace via OAuth v2 to receive real-time Block Kit alerts whenever an email sender hits their hourly rate limit.
+                Connect your team workspace to receive real-time alerts whenever an email sender hits their hourly limit or requires attention.
               </p>
             </div>
           </div>
@@ -200,14 +200,13 @@ export const SlackTab: React.FC<SlackTabProps> = ({ onSuccess, onError }) => {
           </div>
         )}
 
-        {/* Cooldown Architecture Notes */}
+        {/* Notification Policy Notes */}
         <div className="mt-6 p-4 rounded-xl bg-indigo-950/20 border border-indigo-900/30 flex items-start gap-3">
           <ShieldCheck className="w-5 h-5 text-indigo-400 flex-shrink-0 mt-0.5" />
           <div className="text-xs text-indigo-200 leading-relaxed space-y-1">
-            <p className="font-semibold text-white">Non-Spam Guarantee & 15-Minute Redis Debouncing</p>
+            <p className="font-semibold text-white">Smart Rate Limit Notifications</p>
             <p>
-              When a sender reaches their hourly rate limit, pending jobs mature together in BullMQ. To prevent flooding your Slack channel, ReachInbox enforces an atomic Redis debounce key (
-              <code className="text-indigo-300">rate-limit:sender:{'{id}'}:slack_alert_cooldown</code> with 900s TTL). Only one alert is posted per sender every 15 minutes.
+              When a sender profile reaches its hourly delivery limit, ReachInbox sends an alert to your chosen Slack channel so your team stays informed. Alerts are automatically debounced to avoid notification overload.
             </p>
           </div>
         </div>

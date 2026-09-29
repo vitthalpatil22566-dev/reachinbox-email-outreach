@@ -5,16 +5,16 @@ import {
   ExternalLink,
   ChevronLeft,
   ChevronRight,
-  Database,
 } from 'lucide-react';
 import { api } from '../api/client';
-import { SearchResultItem, Sender } from '../types';
+import { SearchResultItem, Sender, EmailRecord } from '../types';
 
 interface SearchTabProps {
   senders: Sender[];
+  onSelectEmail?: (email: EmailRecord) => void;
 }
 
-export const SearchTab: React.FC<SearchTabProps> = ({ senders }) => {
+export const SearchTab: React.FC<SearchTabProps> = ({ senders, onSelectEmail }) => {
   const [query, setQuery] = useState<string>('');
   const [status, setStatus] = useState<string>('');
   const [senderId, setSenderId] = useState<string>('');
@@ -158,11 +158,10 @@ export const SearchTab: React.FC<SearchTabProps> = ({ senders }) => {
         </div>
       </form>
 
-      {/* Metrics Banner */}
+      {/* Search Summary Banner */}
       <div className="flex items-center justify-between text-xs text-reach-muted px-1">
-        <span className="flex items-center gap-1.5">
-          <Database className="w-3.5 h-3.5 text-indigo-400" />
-          Elasticsearch Index: <code className="text-gray-300">reachinbox-emails</code>
+        <span className="font-medium text-gray-300">
+          Search Results
         </span>
         {hasSearched && (
           <span>
@@ -201,8 +200,29 @@ export const SearchTab: React.FC<SearchTabProps> = ({ senders }) => {
                   </td>
                 </tr>
               ) : (
-                results.map((r) => (
-                  <tr key={r.emailId || r.id} className="hover:bg-reach-bg/40 transition-colors">
+                results.map((r) => {
+                  const record: EmailRecord = {
+                    id: r.emailId || r.id,
+                    recipientEmail: r.recipient,
+                    subject: r.subject,
+                    body: r.body,
+                    status: r.status,
+                    scheduledFor: r.scheduledFor,
+                    sentAt: r.sentAt,
+                    attempts: r.attempts || 0,
+                    lastError: r.lastError,
+                    etherealPreviewUrl: r.etherealPreviewUrl,
+                    createdAt: r.createdAt || r.scheduledFor,
+                    sender: r.senderEmail
+                      ? { id: r.senderId || '', email: r.senderEmail, name: r.senderEmail.split('@')[0] }
+                      : null,
+                  };
+                  return (
+                    <tr
+                      key={r.emailId || r.id}
+                      onClick={() => onSelectEmail?.(record)}
+                      className="hover:bg-reach-bg/70 cursor-pointer transition-colors group"
+                    >
                     <td className="py-4 px-6 font-medium text-white max-w-xs truncate">{r.recipient}</td>
                     <td className="py-4 px-6 max-w-xs truncate text-gray-300">{r.subject}</td>
                     <td className="py-4 px-6 text-xs text-reach-muted truncate">
@@ -232,8 +252,9 @@ export const SearchTab: React.FC<SearchTabProps> = ({ senders }) => {
                       )}
                     </td>
                   </tr>
-                ))
-              )}
+                );
+              })
+            )}
             </tbody>
           </table>
         </div>

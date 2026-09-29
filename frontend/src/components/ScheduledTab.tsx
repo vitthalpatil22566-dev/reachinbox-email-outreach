@@ -11,7 +11,11 @@ import {
 import { api } from '../api/client';
 import { EmailRecord, EmailStatus } from '../types';
 
-export const ScheduledTab: React.FC = () => {
+interface ScheduledTabProps {
+  onSelectEmail?: (email: EmailRecord) => void;
+}
+
+export const ScheduledTab: React.FC<ScheduledTabProps> = ({ onSelectEmail }) => {
   const [emails, setEmails] = useState<EmailRecord[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -165,7 +169,11 @@ export const ScheduledTab: React.FC = () => {
                 </tr>
               ) : (
                 emails.map((e) => (
-                  <tr key={e.id} className="hover:bg-reach-bg/40 transition-colors">
+                  <tr
+                    key={e.id}
+                    onClick={() => onSelectEmail?.(e)}
+                    className="hover:bg-reach-bg/70 cursor-pointer transition-colors group"
+                  >
                     <td className="py-4 px-6 font-medium text-white max-w-xs truncate">
                       {e.recipientEmail}
                     </td>

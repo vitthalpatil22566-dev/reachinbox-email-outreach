@@ -11,7 +11,11 @@ import {
 import { api } from '../api/client';
 import { EmailRecord } from '../types';
 
-export const SentTab: React.FC = () => {
+interface SentTabProps {
+  onSelectEmail?: (email: EmailRecord) => void;
+}
+
+export const SentTab: React.FC<SentTabProps> = ({ onSelectEmail }) => {
   const [emails, setEmails] = useState<EmailRecord[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -49,13 +53,13 @@ export const SentTab: React.FC = () => {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
-            Delivered Emails
+            Sent Emails
             <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
               {totalCount} Total
             </span>
           </h2>
           <p className="text-xs text-reach-muted mt-0.5">
-            Verified SMTP acceptance with live Ethereal email preview links.
+            Verified email outreach deliveries with preview links.
           </p>
         </div>
 
@@ -111,7 +115,11 @@ export const SentTab: React.FC = () => {
                 </tr>
               ) : (
                 emails.map((e) => (
-                  <tr key={e.id} className="hover:bg-reach-bg/40 transition-colors">
+                  <tr
+                    key={e.id}
+                    onClick={() => onSelectEmail?.(e)}
+                    className="hover:bg-reach-bg/70 cursor-pointer transition-colors group"
+                  >
                     <td className="py-4 px-6 font-medium text-white max-w-xs truncate">
                       {e.recipientEmail}
                     </td>

@@ -7,6 +7,9 @@ import {
   SearchResponse,
   SlackStatus,
   SlackChannel,
+  SystemHealth,
+  EmailJobStatus,
+  EmailRecord,
 } from '../types';
 
 export const API_BASE = (import.meta as any).env?.VITE_API_URL || 'http://localhost:5000';
@@ -78,13 +81,20 @@ export const api = {
       const res = await client.get('/api/v1/emails/search', { params });
       return res.data?.data;
     },
-    getById: async (id: string) => {
+    getById: async (id: string): Promise<EmailRecord> => {
       const res = await client.get(`/api/v1/emails/${id}`);
       return res.data?.data;
     },
-    getJobStatus: async (id: string) => {
+    getJobStatus: async (id: string): Promise<EmailJobStatus> => {
       const res = await client.get(`/api/v1/emails/${id}/job`);
       return res.data?.data;
+    },
+  },
+
+  system: {
+    getHealth: async (): Promise<SystemHealth> => {
+      const res = await client.get('/health');
+      return res.data;
     },
   },
 
